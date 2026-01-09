@@ -1,0 +1,22 @@
+# Core dependencies
+moviepy==1.0.3
+Pillow==10.0.0
+gTTS==2.3.2
+requests==2.31.0
+
+# Google APIs for YouTube upload
+google-api-python-client==2.104.0
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
+
+# Optional AI APIs
+huggingface-hub==0.19.4
+replicate==0.22.0
+
+# Audio processing
+pydub==0.25.1
+edge-tts==6.1.9
+
+# Image processing
+opencv-python==4.8.1.78
+numpy==1.24.3
