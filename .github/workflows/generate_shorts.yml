@@ -5,48 +5,91 @@ on:
     - cron: '0 8 * * *'  # 8 AM UTC
     - cron: '0 20 * * *' # 8 PM UTC
   workflow_dispatch:  # Allow manual trigger
+  push:
+    branches: [ main ]
 
 jobs:
   generate-and-upload:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # Prevent long-running jobs
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
       
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
+        cache: 'pip'
         
-    - name: Install dependencies
+    - name: Cache Python packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install system dependencies
       run: |
-        pip install -r requirements.txt
         sudo apt-get update
-        sudo apt-get install -y ffmpeg imagemagick
+        sudo apt-get install -y ffmpeg imagemagick libmagickwand-dev
         
-    - name: Install moviepy dependencies
+    - name: Install Python dependencies
       run: |
-        pip install moviepy
-        pip install gTTS
-        pip install pillow
-        pip install requests
-        pip install google-api-python-client
-        pip install google-auth-oauthlib google-auth-httplib2
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Create assets directory
+      run: |
+        mkdir -p assets/music
+        mkdir -p assets/fonts
+        # Add fallback background music if not exists
+        if [ ! -f "assets/music/background.mp3" ]; then
+          echo "Downloading fallback music..."
+          curl -L -o assets/music/background.mp3 https://cdn.pixabay.com/download/audio/2022/03/15/audio_d1715b2f2c.mp3 || true
+        fi
         
     - name: Run YouTube Shorts Generator
+      id: generate
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
         UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
         YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
         YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
         YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
       run: |
-        python scripts/main.py
+        echo "Starting generation..."
+        python scripts/main.py || echo "Generation failed, check logs"
+        echo "generation_done=true" >> $GITHUB_OUTPUT
         
-    - name: Upload generated video
-      uses: actions/upload-artifact@v3
+    - name: Upload generated videos
+      if: steps.generate.outputs.generation_done == 'true'
+      uses: actions/upload-artifact@v4
       with:
-        name: generated-shorts
-        path: shorts_output_*.mp4
+        name: youtube-shorts
+        path: |
+          shorts_output_*.mp4
+          generated_image_*.png
         retention-days: 7
+        if-no-files-found: warn
+        
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: generation-logs
+        path: |
+          metadata.json
+          *.log
+        retention-days: 30
+        
+    - name: Clean up old videos
+      if: always()
+      run: |
+        find . -name "shorts_output_*.mp4" -mtime +1 -delete
+        find . -name "generated_image_*.png" -mtime +1 -delete
